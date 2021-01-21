@@ -25,7 +25,7 @@ import java.net.Socket;
 import java.util.Scanner;
 import java.awt.event.ActionEvent;
 
-public class Peer {
+public class Peer{
 
 	private JFrame frmPiuChat;
 	private JTextField txtAddress;
@@ -39,12 +39,9 @@ public class Peer {
 	private JComboBox cmbVehicle;
 	private JLabel lblVehicle;
 	private JLabel lblVehicle2;
+	private String vehicleName;
+	private Boolean isConnected;
 	private Boolean isRemote;
-	private Params params2;
-	private Params params1;
-
-	private String zozImg;
-
 	/**
 	 * Launch the application.
 	 */
@@ -65,6 +62,8 @@ public class Peer {
 	 * Create the application.
 	 */
 	public Peer() {
+		isConnected=false;
+		isRemote=false;
 		initialize();
 		listModel = new DefaultListModel<>();
 		lstMessages.setModel(listModel);
@@ -78,7 +77,10 @@ public class Peer {
 		frmPiuChat.getContentPane().addMouseMotionListener(new MouseMotionAdapter() {
 			@Override
 			public void mouseMoved(MouseEvent e) {
-				moveVehicle(e.getX(), e.getY());
+				if(isConnected){
+					moveVehicle(e.getX(), e.getY());
+				}
+				
 			}
 		});
 		frmPiuChat.setTitle("PIU Chat");
@@ -108,9 +110,7 @@ public class Peer {
 		JButton btnHost = new JButton("Host");
 		btnHost.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-
 				hostANetwork();
-
 			}
 		});
 		btnHost.setBounds(300, 24, 117, 29);
@@ -142,15 +142,12 @@ public class Peer {
 
 		lblVehicle2 = new JLabel("");
 		lblVehicle2.setIcon(new ImageIcon("img/car.png"));
-		params2 = new Params("27", "340", "Car");
-		params1 = new Params("27", "340", "Car");
 		lblVehicle2.setBounds(27, 340, 71, 32);
-		frmPiuChat.getContentPane().add(lblVehicle2);
-
+		
 		JButton btnStart = new JButton("Start");
 		btnStart.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-				StartRemote();
+				isRemote = true;
 			}
 		});
 		btnStart.setBounds(300, 300, 117, 29);
@@ -159,40 +156,21 @@ public class Peer {
 
 	private void changeVehicle() {
 		String vehicle = cmbVehicle.getSelectedItem().toString();
-		params1.setImgName(vehicle);
 
 		if (vehicle.equals("Car")) {
 			lblVehicle.setIcon(new ImageIcon("img/car.png"));
+			vehicleName="Car";
 		} else {
+			vehicleName="motorbike";
 			lblVehicle.setIcon(new ImageIcon("img/motorbike.png"));
 		}
 	}
 
 	private void moveVehicle(int x, int y) {
 		lblVehicle.setBounds(x, y, lblVehicle.getWidth(), lblVehicle.getHeight());
-		String iX = Integer.toString(x);
-		String iY = Integer.toString(y);
-		params1.setXY(iX, iY);
-	}
-
-	private void moveVehicle2(Params params) {
-		Integer x = params.getX();
-		Integer y = params.getY();
-
-		lblVehicle2.setBounds(x, y, lblVehicle.getWidth(), lblVehicle.getHeight());
-	}
-
-	private void changeVehicle2(Params params) {
-		String oldImgName = params2.getImgName();
-		String newImgName = params.getImgName();
-		if (oldImgName.equals(newImgName)) {
-			return;
-		} else {
-			if (newImgName.equals("Car")) {
-				lblVehicle2.setIcon(new ImageIcon("img/car.png"));
-			} else {
-				lblVehicle2.setIcon(new ImageIcon("img/motorbike.png"));
-			}
+		if(isConnected){
+			Thread thread = new RemoteUpdateThread(x, y, vehicleName);
+            thread.start();
 		}
 	}
 
@@ -208,18 +186,38 @@ public class Peer {
 
 	}
 
-	private void StartRemote() {
-		isRemote = true;
-		Thread thread = new StartRemoteThread();
-		thread.start();
-	}
+	private class RemoteUpdateThread extends Thread {
+        private int x;
+        private int y;
+        private String imgName;
 
-	private void StopRemote() {
-		isRemote = false;
-		// Thread thread = new StopRemoteThread();
-		// thread.start();
-	}
+        public RemoteUpdateThread(int x, int y, String imgName) {
+            super();
+            this.x = x;
+            this.y = y;
+            this.imgName = imgName;
+        }
 
+        @Override
+        public void run() {
+            super.run();
+
+            try {
+				if(isRemote){
+					OutputStream outputStream = connection.getOutputStream();
+					PrintWriter printWriter = new PrintWriter(outputStream);
+					String message = x + "##" + y + "##" + imgName;
+					printWriter.write(message + "\n");
+					printWriter.flush();
+				}
+              
+				
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+	}
+	
 	private class NetworkHostingThread extends Thread {
 		@Override
 		public void run() {
@@ -228,10 +226,15 @@ public class Peer {
 			try {
 				ServerSocket serverSocket = new ServerSocket(9999);
 				lblStatus.setText("Wait...");
-				connection = serverSocket.accept();
-				lblStatus.setText("Connected");
-				Thread thread = new ChatReaderThread();
-				thread.start();
+				while(true){
+					connection = serverSocket.accept();
+					lblStatus.setText("Connected");
+					if(connection.isConnected()){
+						isConnected=true;
+						Thread thread = new RemoteReaderThread();
+						thread.start();
+					}
+				}
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -242,64 +245,45 @@ public class Peer {
 		@Override
 		public void run() {
 			super.run();
-
 			String hostAddress = txtAddress.getText();
 			try {
 				lblStatus.setText("Connecting ...");
 				connection = new Socket(hostAddress, 9999);
 				if (connection.isConnected()) {
 					lblStatus.setText("Connected to ");
+					isConnected=true;
+					Thread thread = new RemoteReaderThread();
+					thread.start();
 				}
-				Thread thread = new ChatReaderThread();
-				thread.start();
 			} catch (IOException e) {
 				e.printStackTrace();
+				System.out.println("Connection fail. " + e.getMessage());
+                lblStatus.setText("Fail To connect...");
 			}
 		}
 	}
 
-	private class ChatReaderThread extends Thread {
+	private class RemoteReaderThread extends Thread {
 		@Override
 		public void run() {
 			super.run();
 
 			try {
-				while (true) {
 					InputStream inputStream = connection.getInputStream();
 					Scanner scanner = new Scanner(inputStream);
 					while (true) {
-						String rawString = scanner.nextLine();
-						listModel.addElement(rawString);
-						Params params = Params.fromRawString(rawString);
-						params1 = params;
-						changeVehicle2(params);
-						moveVehicle2(params);
-						System.out.println("[ChatReaderThread] Received : " + params.toRawString());
+							String rawString = scanner.nextLine();
+							listModel.addElement("Other Peer is moving");
+							Params params = Params.fromRawString(rawString);
+							lblVehicle2.setBounds(params.getX(),params.getY(),lblVehicle2.getWidth(), lblVehicle2.getHeight());
+							
+							if (params.getImgName().equals("motorbike")) {
+								lblVehicle2.setIcon(new ImageIcon("img/motorbike.png"));
+							} else {
+								lblVehicle2.setIcon(new ImageIcon("img/car.png"));
+							}
+							frmPiuChat.getContentPane().add(lblVehicle2);
 					}
-
-				}
-
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-
-		}
-	}
-
-	private class StartRemoteThread extends Thread {
-		@Override
-		public void run() {
-			super.run();
-			Integer n = 0;
-			try {
-				while (isRemote) {
-					OutputStream outputStream = connection.getOutputStream();
-					PrintWriter printWriter = new PrintWriter(outputStream);
-					String rawParams = params1.toRawString();
-					printWriter.write(rawParams + "\n");
-					printWriter.flush();
-					n++;
-				}
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
